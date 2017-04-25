@@ -269,7 +269,7 @@ class ModelProvider:
         model = ModelAccessor()
 
         model_builder = self.agent_types.get(agent_type)
-        if not agent_type is None:
+        if model_builder:
             model_builder(agent_type, self.logger).build_model(model)
 
         self.save_model(model, time.strftime("archive/%d.%m.%Y %H:%M"))

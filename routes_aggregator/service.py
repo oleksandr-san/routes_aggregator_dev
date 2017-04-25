@@ -22,6 +22,8 @@ class Service:
         logger = logging.getLogger("routes_aggregator")
         fh = logging.FileHandler('routes_aggregator.log')
         fh.setLevel(logging.INFO)
+        fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        fh.setFormatter(fmt)
         logger.addHandler(fh)
 
         self.db_accessor = DbAccessor((db_user, db_password), logger)
