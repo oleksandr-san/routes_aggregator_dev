@@ -11,8 +11,11 @@ from routes_aggregator.model import ModelAccessor, Station, Route, RoutePoint
 
 class BaseAgent:
 
-    def __init__(self):
+    def __init__(self, agent_type, logger):
         self.session = requests.session()
+
+        self.agent_type = agent_type
+        self.logger = logger
 
     @staticmethod
     def prepare_time(time):
@@ -24,10 +27,9 @@ class BaseAgent:
 
 class UZSubtrainAgent(BaseAgent):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, agent_type, logger):
+        super().__init__(agent_type, logger)
 
-        self.agent_type = "uzs"
         self.language_map = {"ua": "", "ru": "_ru", "en": "_en"}
 
     def build_model(self, model):
@@ -68,11 +70,10 @@ class UZSubtrainAgent(BaseAgent):
 
                         station.set_station_name(station_name, language)
 
-        print('Station building session - {} stations to build'.format(len(model.stations.values())))
+        self.logger.info('Station building session - {} stations to build'.format(len(model.stations.values())))
         for i, station in enumerate(model.stations.values()):
 
             station_id = station.station_id
-            print('Building station #{} from {}'.format(i + 1, len(model.stations.values())))
             time.sleep(0.1)
 
             for item in self.language_map.items():
@@ -114,11 +115,9 @@ class UZSubtrainAgent(BaseAgent):
                                   "table/tr[2]/td/center/table/tr/td/table/tr[@class=\'on\' or @class=\'onx\']"
         route_table_url = "http://swrailway.gov.ua/timetable/eltrain/?tid={route_id}"
 
-        print('Routes building session - {} routes to build'.format(len(model.routes.values())))
+        self.logger.info('Routes building session - {} routes to build'.format(len(model.routes.values())))
         for i, route in enumerate(model.routes.values()):
             response = self.session.get(route_table_url.format(route_id=route.route_id))
-
-            print('Building route #{} from {}'.format(i + 1, len(model.routes.values())))
             time.sleep(0.1)
 
             if response.ok:
@@ -142,10 +141,9 @@ class UZSubtrainAgent(BaseAgent):
 
 class UZAgent(BaseAgent):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, agent_type, logger):
+        super().__init__(agent_type, logger)
 
-        self.agent_type = "uz"
         self.language_map = {"ua": "", "en": "en"}
 
     def build_model(self, model):
@@ -172,10 +170,9 @@ class UZAgent(BaseAgent):
 
         while stations_to_build or routes_to_build:
 
-            print('Station building session - {} stations to build'.format(len(stations_to_build)))
+            self.logger.info('Station building session - {} stations to build'.format(len(stations_to_build)))
             for i, station_id in enumerate(stations_to_build):
 
-                print('Building station #{} from {}'.format(i+1, len(stations_to_build)))
                 time.sleep(0.1)
                 for item in self.language_map.items():
 
@@ -212,10 +209,9 @@ class UZAgent(BaseAgent):
                                         routes_to_build.add(route_id)
             stations_to_build.clear()
 
-            print('Routes building session - {} routes to build'.format(len(routes_to_build)))
+            self.logger.info('Routes building session - {} routes to build'.format(len(routes_to_build)))
             for i, route_id in enumerate(routes_to_build):
 
-                print('Building route #{} from {} '.format(i+1, len(routes_to_build)))
                 route = model.find_route(route_id)
                 if route is None:
                     continue
@@ -264,16 +260,17 @@ class UZAgent(BaseAgent):
 
 class ModelProvider:
 
-    def __init__(self, credentials):
+    def __init__(self, credentials, logger):
         self.agent_types = {'uz': UZAgent, 'uzs': UZSubtrainAgent}
         self.credentials = credentials
+        self.logger = logger
 
     def build_model(self, agent_type):
         model = ModelAccessor()
 
-        agent_type = self.agent_types.get(agent_type)
+        model_builder = self.agent_types.get(agent_type)
         if not agent_type is None:
-            agent_type().build_model(model)
+            model_builder(agent_type, self.logger).build_model(model)
 
         self.save_model(model, time.strftime("archive/%d.%m.%Y %H:%M"))
         self.save_model(model, "current")
@@ -281,14 +278,14 @@ class ModelProvider:
 
     def __get_storage_client(self):
         try:
-            client = boto3.client(
+            return boto3.client(
                 's3',
                 aws_access_key_id=self.credentials[0],
                 aws_secret_access_key=self.credentials[1],
                 config=Config(signature_version='s3v4'))
         except Exception as e:
-            client = None
-        return client
+            self.logger.error(str(e))
+            return None
 
     @staticmethod
     def __prepare_object_name(agent_type, object_name):
@@ -310,7 +307,7 @@ class ModelProvider:
                         self.__prepare_object_name(model.agent_type, object_name))
                 os.remove('temp.data')
         except Exception as e:
-            pass
+            self.logger.error(str(e))
 
     def load_model(self, agent_type, object_name):
         try:
@@ -325,6 +322,7 @@ class ModelProvider:
                 with open('temp.data', 'rb') as fileobj:
                     model.restore_binary(fileobj)
                 os.remove('temp.data')
+            return model
         except Exception as e:
-            model = None
-        return model
+            self.logger.error(str(e))
+            return None

@@ -63,11 +63,12 @@ class DbAccessor:
     RETURN_PART_END = " LIMIT $limit"
     RETURN_PART_PATTERN = ", r{}, n{}, r{}"
 
-    def __init__(self, credentials):
+    def __init__(self, credentials, logger):
         self.driver = GraphDatabase.driver(
             'bolt://localhost',
             auth=basic_auth(credentials[0], credentials[1]))
 
+        self.logger = logger
         self.create_indices()
 
     @staticmethod
@@ -96,9 +97,9 @@ class DbAccessor:
                 with session.begin_transaction() as transaction:
                     result = executor(transaction)
         except (CypherError, DatabaseError) as e:
-            pass
+            self.logger.error(str(e))
         except Exception as e:
-            pass
+            self.logger.error(str(e))
         return result
 
     def create_indices(self):
