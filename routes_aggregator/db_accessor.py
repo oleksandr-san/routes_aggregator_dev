@@ -1,6 +1,6 @@
 from neo4j.v1 import GraphDatabase, basic_auth, CypherError, DatabaseError
 
-from routes_aggregator.model import Entity, Station, Route, RoutePoint
+from routes_aggregator.model import Entity, Station, Route, RoutePoint, Path, PathItem
 
 
 class DbAccessor:
@@ -40,20 +40,28 @@ class DbAccessor:
                                     "r, s2.station_id as arrival_station_id " \
                                     "ORDER BY toInteger(r.transition_number)"
 
-    MATCH_DIRECT_ROUTES = "MATCH (s1:Station)-[r1:ROUTE_CONNECTION]->(n:Route)" \
-                          "<-[r2:ROUTE_CONNECTION]-(s2:Station) " \
-                          "WHERE s1.domain_id in $departure_station_ids " \
-                          "AND s2.domain_id in $arrival_station_ids " \
-                          "AND toInteger(r1.station_number) < toInteger(r2.station_number) " \
-                          "RETURN DISTINCT r1.station_number as departure_route_point, " \
-                          "n, r2.station_number as arrival_route_point " \
-                          "ORDER BY n.route_number limit $limit"
+    MATCH_SHORTEST_PATHS = "MATCH (s1:Station), (s2:Station), " \
+                           "n=allShortestPaths((s1)-[rs:TRANSITION*..{max_transitions}]->(s2)) " \
+                           "WHERE s1.domain_id in $departure_station_ids " \
+                           "AND s2.domain_id in $arrival_station_ids " \
+                           "RETURN relationships(n) as transitions LIMIT $limit"
 
     SEARCH_QUERY_MAP = {
         "STARTS_WITH": MATCH_BY_PARAMETER_STARTS_WITH,
         "STRICT": MATCH_BY_PARAMETER_STRICT,
         "REGEX": MATCH_BY_PARAMETER_REGEX
     }
+
+    MATCH_PART_BEGIN = "MATCH (s1:Station)-[r1:ROUTE_CONNECTION]->(n1:Route)"
+    MATCH_PART_END = "<-[r{}:ROUTE_CONNECTION]-(s{}:Station) "
+    MATCH_PART_PATTERN = "<-[r{}:ROUTE_CONNECTION]-(s{}:Station)-[r{}:ROUTE_CONNECTION]->(n{}:Route)"
+
+    WHERE_PART = "WHERE s1.domain_id in $departure_station_ids and s{}.domain_id in $arrival_station_ids "
+    CONDITION_PART = "and toInteger(r{}.station_number) < toInteger(r{}.station_number) "
+
+    RETURN_PART_BEGIN = "RETURN DISTINCT r1, n1, r2"
+    RETURN_PART_END = " LIMIT $limit"
+    RETURN_PART_PATTERN = ", r{}, n{}, r{}"
 
     def __init__(self, credentials):
         self.driver = GraphDatabase.driver(
@@ -172,8 +180,14 @@ class DbAccessor:
             departure_station_id = route_point.station_id
             departure_time = route_point.departure_time
 
-    def extract_route(self, data_item, transaction):
+    def extract_station(self, data_item):
         properties = data_item['n'].properties
+        station = Station(properties['agent_type'], properties['station_id'])
+        self.set_properties(station, properties)
+        return station
+
+    def extract_route(self, data_item, transaction, node_name='n'):
+        properties = data_item[node_name].properties
         route = Route(properties['agent_type'], properties['route_id'])
         self.set_properties(route, properties)
 
@@ -205,35 +219,29 @@ class DbAccessor:
                     route.add_route_point(route_point)
         return route
 
-    def extract_station(self, data_item):
-        properties = data_item['n'].properties
-        station = Station(properties['agent_type'], properties['station_id'])
-        self.set_properties(station, properties)
-        return station
+    def __get_station(self, domain_id, transaction):
+        result = transaction.run(
+            self.MATCH_STATION_BY_DOMAIN_ID,
+            {'domain_id': domain_id})
+        if result:
+            data = result.data()
+            return self.extract_station(data[0]) if data else None
+        return None
 
     def get_station(self, domain_id):
-        def station_getter(transaction):
-            result = transaction.run(
-                self.MATCH_STATION_BY_DOMAIN_ID,
-                {'domain_id': domain_id})
-            if result:
-                data = result.data()
-                return self.extract_station(data[0]) if data else None
-            return None
+        return self.execute(lambda transaction: self.__get_station(domain_id, transaction))
 
-        return self.execute(station_getter)
+    def __get_route(self, domain_id, transaction):
+        result = transaction.run(
+            self.MATCH_ROUTE_BY_DOMAIN_ID,
+            {'domain_id': domain_id})
+        if result:
+            data = result.data()
+            return self.extract_route(data[0], transaction) if data else None
+        return None
 
     def get_route(self, domain_id):
-        def route_getter(transaction):
-            result = transaction.run(
-                self.MATCH_ROUTE_BY_DOMAIN_ID,
-                {'domain_id': domain_id})
-            if result:
-                data = result.data()
-                return self.extract_route(data[0], transaction) if data else None
-            return None
-
-        return self.execute(route_getter)
+        return self.execute(lambda transaction: self.__get_route(domain_id, transaction))
 
     def find_stations(self, station_name, language, search_mode, limit):
         def stations_getter(transaction):
@@ -290,12 +298,29 @@ class DbAccessor:
 
         return self.execute(routes_getter, [])
 
-    def find_direct_routes(self, departure_station_ids, arrival_station_ids, limit):
+    def __generate_match_paths_query(self, transfers_count):
+        match_part = self.MATCH_PART_BEGIN
+        condition_part = self.WHERE_PART.format(transfers_count + 2) + self.CONDITION_PART.format(1, 2)
+        return_part = self.RETURN_PART_BEGIN
+
+        for i in range(transfers_count):
+            match_part += self.MATCH_PART_PATTERN.format(2 * i + 2, i + 2, 2 * i + 3, i + 2)
+            condition_part += self.CONDITION_PART.format(2 * i + 3, 2 * i + 4)
+            return_part += self.RETURN_PART_PATTERN.format(2 * i + 3, i + 2, 2 * i + 4)
+
+        match_part += self.MATCH_PART_END.format(2 * transfers_count + 2, transfers_count + 2)
+        return_part += self.RETURN_PART_END
+
+        return match_part + condition_part + return_part
+
+    def find_paths(self, departure_station_ids, arrival_station_ids,
+                   transfers_count, limit):
+
         def routes_getter(transaction):
-            routes = []
+            paths = []
 
             result = transaction.run(
-                self.MATCH_DIRECT_ROUTES,
+                self.__generate_match_paths_query(transfers_count),
                 {'departure_station_ids': departure_station_ids,
                  'arrival_station_ids': arrival_station_ids,
                  'limit': limit}
@@ -303,11 +328,54 @@ class DbAccessor:
             data = result.data()
             if data:
                 for data_item in data:
-                    route = self.extract_route(data_item, transaction)
-                    departure_route_point = data_item['departure_route_point']
-                    arrival_route_point = data_item['arrival_route_point']
-                    routes.append((route, departure_route_point, arrival_route_point))
-            return routes
+                    path = Path()
+                    for i in range(transfers_count + 1):
+                        node_name = 'n{}'.format(i + 1)
+                        first_connection = data_item['r{}'.format(2 * i + 1)]
+                        second_connection = data_item['r{}'.format(2 * i + 2)]
+
+                        route = self.extract_route(data_item, transaction, node_name=node_name)
+                        departure_route_point = first_connection.properties['station_number']
+                        arrival_route_point = second_connection.properties['station_number']
+                        path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
+                    paths.append(path)
+            return paths
+
+        return self.execute(routes_getter, [])
+
+    def find_shortest_paths(self, departure_station_ids, arrival_station_ids,
+                            max_transitions, limit):
+        def routes_getter(transaction):
+            paths = []
+            routes_cache = {}
+
+            result = transaction.run(
+                self.MATCH_SHORTEST_PATHS.format(max_transitions=max_transitions),
+                {'departure_station_ids': departure_station_ids,
+                 'arrival_station_ids': arrival_station_ids,
+                 'limit': limit}
+            )
+            data = result.data()
+            if data:
+                for data_item in data:
+                    path = Path()
+                    transitions = data_item['transitions']
+                    for transition in transitions:
+                        agent_type = transition.properties['agent_type']
+                        route_id = Route.get_domain_id(agent_type, transition.properties['route_id'])
+                        transition_number = int(transition.properties['transition_number'])
+
+                        if route_id in routes_cache:
+                            route = routes_cache[route_id]
+                        else:
+                            route = self.__get_route(route_id, transaction)
+                            routes_cache[route_id] = route
+
+                        departure_route_point = transition_number
+                        arrival_route_point = transition_number + 1
+                        path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
+                    paths.append(path)
+            return paths
 
         return self.execute(routes_getter, [])
 
