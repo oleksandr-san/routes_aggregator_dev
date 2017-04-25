@@ -1,16 +1,32 @@
-import boto3
 import os
-import requests
 import time
-from lxml import html
-from model import ModelAccessor, Station, Route, Segment
+
+import boto3
+import requests
 from botocore.client import Config
+from lxml import html
+
+from routes_aggregator.model import ModelAccessor, Station, Route, RoutePoint
 
 
-class UZSubtrainAgent:
+class BaseAgent:
 
     def __init__(self):
         self.session = requests.session()
+
+    @staticmethod
+    def prepare_time(time):
+        if not time or len(time) == 1:
+            return ''
+        else:
+            return time
+
+
+class UZSubtrainAgent(BaseAgent):
+
+    def __init__(self):
+        super().__init__()
+
         self.agent_type = "uzs"
         self.language_map = {"ua": "", "ru": "_ru", "en": "_en"}
 
@@ -18,13 +34,16 @@ class UZSubtrainAgent:
         model.agent_type = self.agent_type
         self.build_stations(model)
         self.build_routes(model)
-        self.build_segments(model)
 
     def build_stations(self, model):
 
+        station_element_xpath = "/html/body/table/tr[2]/td/table/tr[3]/td[4]/" \
+                                "table/tr/td/table/tr[2]/td/center/li/table[2]/tr/td/ul/li/a"
+        station_table_row_xpath = "/html/body/table/tr[2]/td/table/tr[3]/td[4]/table/tr/td/" \
+                                  "table/tr[2]/td/center/table/tr[@class=\'on\' or @class=\'onx\']"
+
         station_schedule_url = 'http://swrailway.gov.ua/timetable/eltrain/?geo2_list=1&lng={language}'
-        station_element_xpath = '/html/body/table/tr[2]/td/table/tr[3]/td[4]/' \
-                                'table/tr/td/table/tr[2]/td/center/li/table[2]/tr/td/ul/li/a';
+        station_table_url = "http://swrailway.gov.ua/timetable/eltrain/?sid={station_id}&lng={language}"
 
         for item in self.language_map.items():
 
@@ -48,11 +67,6 @@ class UZSubtrainAgent:
                             model.add_station(station)
 
                         station.set_station_name(station_name, language)
-
-    def build_routes(self, model):
-        station_table_row_xpath = "/html/body/table/tr[2]/td/table/tr[3]/td[4]/table/tr/td/" \
-                                  "table/tr[2]/td/center/table/tr[@class=\'on\' or @class=\'onx\']"
-        station_table_url = "http://swrailway.gov.ua/timetable/eltrain/?sid={station_id}&lng={language}"
 
         print('Station building session - {} stations to build'.format(len(model.stations.values())))
         for i, station in enumerate(model.stations.values()):
@@ -95,53 +109,42 @@ class UZSubtrainAgent:
                                     station.set_state_name(location_parameters[0].strip(), language)
                                     station.set_country_name(location_parameters[1].strip(), language)
 
-    def build_segments(self, model):
-        segment_table_row_xpath = "/html/body/table/tr[2]/td/table/tr[3]/td[4]/table/tr/td/" \
+    def build_routes(self, model):
+        route_table_row_xpath = "/html/body/table/tr[2]/td/table/tr[3]/td[4]/table/tr/td/" \
                                   "table/tr[2]/td/center/table/tr/td/table/tr[@class=\'on\' or @class=\'onx\']"
-        segment_table_url = "http://swrailway.gov.ua/timetable/eltrain/?tid={route_id}"
+        route_table_url = "http://swrailway.gov.ua/timetable/eltrain/?tid={route_id}"
 
-        print('Routes building session - {} stations to build'.format(len(model.routes.values())))
+        print('Routes building session - {} routes to build'.format(len(model.routes.values())))
         for i, route in enumerate(model.routes.values()):
-            response = self.session.get(segment_table_url.format(route_id=route.route_id))
+            response = self.session.get(route_table_url.format(route_id=route.route_id))
 
             print('Building route #{} from {}'.format(i + 1, len(model.routes.values())))
             time.sleep(0.1)
 
             if response.ok:
                 tree = html.fromstring(response.text)
-                segment_rows = tree.xpath(segment_table_row_xpath)
-                if len(segment_rows) > 2:
+                route_point_rows = tree.xpath(route_table_row_xpath)
+                if len(route_point_rows) > 2:
 
-                    last_station_id = None
-                    last_departure_time = None
-
-                    for segment_row in segment_rows[2:]:
-                        children = segment_row.getchildren()
+                    for route_point_row in route_point_rows[2:]:
+                        children = route_point_row.getchildren()
                         if len(children) > 3:
-                            links = segment_row.xpath('./td/a[@class=\'et\']')
+                            links = route_point_row.xpath('./td/a[@class=\'et\']')
                             href = links[0].get('href') if len(links) else ''
                             if href and href.startswith('.?sid'):
                                 station_id = href[6:href.find('&')]
-                                arrival_time = children[2].text
-                                departure_time = children[3].text
 
-                                if last_station_id and last_departure_time:
-                                    segment = Segment(self.agent_type, route.route_id, str(len(route.segments)))
-                                    segment.departure_station_id = last_station_id
-                                    segment.departure_time = last_departure_time
-                                    segment.arrival_station_id = station_id
-                                    segment.arrival_time = arrival_time
-
-                                    route.add_segment(segment)
-
-                                last_station_id = station_id
-                                last_departure_time = departure_time
+                                route_point = RoutePoint(self.agent_type, route.route_id, station_id)
+                                route_point.arrival_time = self.prepare_time(children[2].text)
+                                route_point.departure_time = self.prepare_time(children[3].text)
+                                route.add_route_point(route_point)
 
 
-class UZAgent:
+class UZAgent(BaseAgent):
 
     def __init__(self):
-        self.session = requests.session()
+        super().__init__()
+
         self.agent_type = "uz"
         self.language_map = {"ua": "", "en": "en"}
 
@@ -159,7 +162,7 @@ class UZAgent:
         route_page_url = 'http://www.uz.gov.ua/{language}/passengers/timetable/' \
                          '?ntrain={route_id}&by_id=1'
         route_information_xpath = '//*[@id="cpn-timetable"]/table[1]/tbody/tr'
-        route_segment_xpath = '//*[@id="cpn-timetable"]/table[2]/tbody/tr'
+        route_point_xpath = '//*[@id="cpn-timetable"]/table[2]/tbody/tr'
 
         station_name_offset_map = {"ua": 19, "en": 25}
         stations_to_build = set()
@@ -236,37 +239,25 @@ class UZAgent:
                                         route.route_number = route_number_components[0].strip()
                                 route.set_periodicity(children[2].text.strip(), language)
 
-                        if len(route.segments):
+                        if len(route.route_points):
                             continue
 
-                        last_station_id = None
-                        last_departure_time = None
-
-                        for segment_row in tree.xpath(route_segment_xpath):
-                            children = segment_row.getchildren()
+                        for route_point_row in tree.xpath(route_point_xpath):
+                            children = route_point_row.getchildren()
                             if len(children) > 2:
-                                links = segment_row.xpath('./td/a')
+                                links = route_point_row.xpath('./td/a')
                                 href = links[0].get('href') if len(links) else ''
                                 if href and href.startswith('?station'):
                                     station_id = href[9:href.find('&')]
-                                    arrival_time = children[1].text
-                                    departure_time = children[2].text
+
+                                    route_point = RoutePoint(self.agent_type, route.route_id, station_id)
+                                    route_point.arrival_time = self.prepare_time(children[1].text)
+                                    route_point.departure_time = self.prepare_time(children[2].text)
+                                    route.add_route_point(route_point)
 
                                     station = model.find_station(station_id)
                                     if station is None:
                                         stations_to_build.add(station_id)
-
-                                    if last_station_id and last_departure_time:
-                                        segment = Segment(self.agent_type, route.route_id, str(len(route.segments)))
-                                        segment.departure_station_id = last_station_id
-                                        segment.departure_time = last_departure_time
-                                        segment.arrival_station_id = station_id
-                                        segment.arrival_time = arrival_time
-
-                                        route.add_segment(segment)
-
-                                    last_station_id = station_id
-                                    last_departure_time = departure_time
 
             routes_to_build.clear()
 
@@ -274,15 +265,15 @@ class UZAgent:
 class ModelProvider:
 
     def __init__(self, credentials):
-        self.agents = {'uz': UZAgent(), 'uzs': UZSubtrainAgent()}
+        self.agent_types = {'uz': UZAgent, 'uzs': UZSubtrainAgent}
         self.credentials = credentials
 
     def build_model(self, agent_type):
         model = ModelAccessor()
 
-        agent = self.agents.get(agent_type)
-        if not agent is None:
-            agent.build_model(model)
+        agent_type = self.agent_types.get(agent_type)
+        if not agent_type is None:
+            agent_type().build_model(model)
 
         self.save_model(model, time.strftime("archive/%d.%m.%Y %H:%M"))
         self.save_model(model, "current")

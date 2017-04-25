@@ -1,14 +1,11 @@
-from model import ModelAccessor, Station, Route, Segment
-from db_accessor import DbAccessor
-from model_provider import ModelProvider
-
-import time
+from routes_aggregator.db_accessor import DbAccessor
+from routes_aggregator.model_provider import ModelProvider
 
 credentials = ('AKIAIVFHGEK5NRLALIWQ', 'k89QjR2GookyZO2An59CrIURiGpkxg/ErwYVAgQy')
 provider = ModelProvider(credentials)
-#provider.build_model('uzs')
+model = provider.build_model('uzs')
 
-#model = provider.load_model('uzs', 'current')
+#model = provider.load_model('uz', 'current')
 
 #model = ModelAccessor()
 #with open('uzs_last.data', 'rb') as fileobj:
@@ -24,10 +21,12 @@ provider = ModelProvider(credentials)
 
 
 db = DbAccessor(('neo4j', '1234'))
-#db.build_model(model)
+db.build_model(model)
 #s = db.get_station("uz22000")
 #s = db.find_stations("Крам", "ua", "STARTS_WITH", 10)
 #r = db.get_route('uz55101')
-#r = db.find_routes('369', 'strict', 10)
+#r = db.find_routes_by_route_number('369', 'strict', 10)
+#r = db.find_routes_by_station_ids(['uz24110', 'uz22100'], 1000)
+#r = db.find_direct_routes(['uzs2528', 'uz22100'], ['uzs1883', 'uz24110'], 10)
 
-print(r)
+#print(r)

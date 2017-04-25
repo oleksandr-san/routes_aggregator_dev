@@ -1,5 +1,8 @@
 import pickle
 
+from routes_aggregator.utils import time_to_minutes, minutes_to_time
+from routes_aggregator.exceptions import AbsentRoutePointsException
+
 
 class ModelAccessor:
 
@@ -99,9 +102,10 @@ class Route(Entity):
 
         self.agent_type = agent_type
         self.route_id = route_id
-        self.segments = []
 
         self.route_number = None
+        self.route_points = []
+
         self.active_from_date = None
         self.active_to_date = None
 
@@ -113,49 +117,65 @@ class Route(Entity):
     def domain_id(self):
         return self.get_domain_id(self.agent_type, self.route_id)
 
+    @property
+    def departure_point(self):
+        if not self.route_points:
+            raise AbsentRoutePointsException(route_id=self.route_id)
+        return self.route_points[0]
+
+    @property
+    def arrival_point(self):
+        if not self.route_points:
+            raise AbsentRoutePointsException(route_id=self.route_id)
+        return self.route_points[-1]
+
+    @property
+    def departure_time(self):
+        return self.departure_point.departure_time
+
+    @property
+    def arrival_time(self):
+        return self.arrival_point.arrival_time
+
+    @property
+    def travel_time(self):
+        return minutes_to_time(abs(time_to_minutes(self.arrival_time) -
+                                   time_to_minutes(self.departure_time)))
+
     def set_periodicity(self, periodicity, language):
         self.set_property("periodicity", language, periodicity)
 
     def get_periodicity(self, language):
         return self.get_property("periodicity", language)
 
-    def add_segment(self, segment):
-        self.segments.append(segment)
+    def add_route_point(self, route_point):
+        self.route_points.append(route_point)
 
 
-class Segment(Entity):
+class RoutePoint(Entity):
 
-    def __init__(self, agent_type, route_id, segment_id):
+    def __init__(self, agent_type, route_id, station_id):
         super().__init__()
 
         self.agent_type = agent_type
         self.route_id = route_id
-        self.segment_id = segment_id
+        self.station_id = station_id
 
-        self.departure_time = None
-        self.departure_station_id = None
         self.arrival_time = None
-        self.arrival_station_id = None
+        self.departure_time = None
 
     @staticmethod
-    def get_domain_id(agent_type, route_id, segment_id):
-        return agent_type + route_id + '.' + segment_id
+    def get_domain_id(agent_type, route_id, station_id):
+        return agent_type + route_id + '.' + station_id
 
     @property
     def domain_id(self):
-        return self.get_domain_id(self.agent_type, self.route_id, self.segment_id)
-
-    @staticmethod
-    def convert_to_minutes(time):
-        result = 0
-        try:
-            components = time.split(':')
-            if len(components):
-                result = int(components[0]) * 60 + int(components[1])
-        except Exception as e:
-            result = 0
-        return result
+        return self.get_domain_id(self.agent_type, self.route_id, self.station_id)
 
     @property
-    def travel_time(self):
-        return abs(self.convert_to_minutes(self.arrival_time)-self.convert_to_minutes(self.departure_time))
+    def stop_time(self):
+        if self.arrival_time and self.departure_time:
+            return minutes_to_time(abs(time_to_minutes(self.departure_time) -
+                                       time_to_minutes(self.arrival_time)))
+        else:
+            return ''

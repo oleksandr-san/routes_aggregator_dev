@@ -1,5 +1,6 @@
 from neo4j.v1 import GraphDatabase, basic_auth, CypherError, DatabaseError
-from model import Entity, Station, Route, Segment
+
+from routes_aggregator.model import Entity, Station, Route, RoutePoint
 
 
 class DbAccessor:
@@ -8,7 +9,7 @@ class DbAccessor:
     CREATE_ROUTE_CONNECTION = \
         "MATCH (a:Route {{ domain_id: '{route_domain_id}' }}), " \
         "      (b:Station {{ domain_id: '{station_domain_id}' }}) " \
-        "CREATE (a)-[:ROUTE_CONNECTION {{ {properties} }} ]->(b)"
+        "CREATE (a)<-[:ROUTE_CONNECTION {{ {properties} }} ]-(b)"
     CREATE_TRANSITION = \
         "MATCH (a:Station {{ domain_id: '{from_domain_id}' }}), " \
         "      (b:Station {{ domain_id: '{to_domain_id}' }}) " \
@@ -28,18 +29,25 @@ class DbAccessor:
                                "=~ $property_value RETURN n LIMIT $limit"
 
     MATCH_ROUTE_BY_DOMAIN_ID = "MATCH (n:Route) WHERE n.domain_id = $domain_id RETURN n"
+    MATCH_ROUTE_BY_STATION_IDS = "MATCH (s:Station)-[r:ROUTE_CONNECTION]->(n:Route) " \
+                                 "WHERE s.domain_id in $station_ids " \
+                                 "RETURN DISTINCT n ORDER BY n.route_number LIMIT $limit"
+
     MATCH_TRANSITIONS_BY_ROUTE_ID = "MATCH (s1:Station)" \
                                     "-[r:TRANSITION { route_id: $route_id }]->" \
                                     "(s2: Station) RETURN DISTINCT " \
                                     "s1.station_id as departure_station_id, " \
                                     "r, s2.station_id as arrival_station_id " \
-                                    "ORDER BY toInteger(r.segment_id)"
+                                    "ORDER BY toInteger(r.transition_number)"
 
-    MATCH_DIRECT_ROUTES = "MATCH (s1:Station)<-[r1:ROUTE_CONNECTION]-" \
-                          "(route:Route)-[r2:ROUTE_CONNECTION]->(s2:Station) " \
-                          "WHERE s1.domain_id in [{from_domain_ids}] and s2.domain_id in [{from_domain_ids}] " \
-                          "and toInt(r1.segment_id) < toInt(r2.segment_id) " \
-                          "return distinct route, r1.segment_id, r2.segment_id limit $limit"
+    MATCH_DIRECT_ROUTES = "MATCH (s1:Station)-[r1:ROUTE_CONNECTION]->(n:Route)" \
+                          "<-[r2:ROUTE_CONNECTION]-(s2:Station) " \
+                          "WHERE s1.domain_id in $departure_station_ids " \
+                          "AND s2.domain_id in $arrival_station_ids " \
+                          "AND toInteger(r1.station_number) < toInteger(r2.station_number) " \
+                          "RETURN DISTINCT r1.station_number as departure_route_point, " \
+                          "n, r2.station_number as arrival_route_point " \
+                          "ORDER BY n.route_number limit $limit"
 
     SEARCH_QUERY_MAP = {
         "STARTS_WITH": MATCH_BY_PARAMETER_STARTS_WITH,
@@ -103,7 +111,8 @@ class DbAccessor:
         properties = {
             'domain_id': station.domain_id,
             'agent_type': station.agent_type,
-            'station_id': station.station_id}
+            'station_id': station.station_id
+        }
 
         properties.update(station.get_properties())
         station_query = self.CREATE_NODE.format(
@@ -118,7 +127,8 @@ class DbAccessor:
             'route_id': route.route_id,
             'route_number': route.route_number,
             'active_to_date': self.prepare_property(route.active_to_date),
-            'active_from_date': self.prepare_property(route.active_from_date)}
+            'active_from_date': self.prepare_property(route.active_from_date)
+        }
 
         properties.update(route.get_properties())
         route_query = self.CREATE_NODE.format(
@@ -126,45 +136,41 @@ class DbAccessor:
             properties=self.prepare_properties(properties))
         transaction.run(route_query)
 
-        built_route_connections = set()
-        station_number = 0
+        departure_station_id = None
+        departure_time = None
+        transaction_number = 0
 
-        def create_route_connection(station_id):
+        for i, route_point in enumerate(route.route_points):
             properties = {
                 'agent_type': route.agent_type,
-                'station_number': station_number}
+                'station_number': i
+            }
+
             route_connection_query = self.CREATE_ROUTE_CONNECTION.format(
-                station_domain_id=Station.get_domain_id(route.agent_type, station_id),
                 route_domain_id=route.domain_id,
+                station_domain_id=Station.get_domain_id(route.agent_type, route_point.station_id),
                 properties=self.prepare_properties(properties))
             transaction.run(route_connection_query)
 
-        for segment in route.segments:
-            if not segment.departure_station_id in built_route_connections:
-                create_route_connection(segment.departure_station_id)
-                built_route_connections.add(segment.departure_station_id)
-                station_number += 1
-            if not segment.arrival_station_id in built_route_connections:
-                create_route_connection(segment.arrival_station_id)
-                built_route_connections.add(segment.arrival_station_id)
-                station_number += 1
+            if departure_time and departure_station_id:
+                properties = {
+                    'agent_type': route.agent_type,
+                    'route_id': route.route_id,
+                    'departure_time': departure_time,
+                    'arrival_time': route_point.arrival_time,
+                    'transition_number': transaction_number
+                }
 
-            self.create_segment(segment, transaction)
+                transition_query = self.CREATE_TRANSITION.format(
+                    from_domain_id=Station.get_domain_id(route.agent_type, departure_station_id),
+                    to_domain_id=Station.get_domain_id(route.agent_type, route_point.station_id),
+                    properties=self.prepare_properties(properties))
+                transaction.run(transition_query)
 
-    def create_segment(self, segment, transaction):
-        properties = {
-            'domain_id': segment.domain_id,
-            'agent_type': segment.agent_type,
-            'route_id': segment.route_id,
-            'segment_id': segment.segment_id,
-            'departure_time': segment.departure_time,
-            'arrival_time': segment.arrival_time}
+                transaction_number += 1
 
-        transition_query = self.CREATE_TRANSITION.format(
-            from_domain_id=Station.get_domain_id(segment.agent_type, segment.departure_station_id),
-            to_domain_id=Station.get_domain_id(segment.agent_type, segment.arrival_station_id),
-            properties=self.prepare_properties(properties))
-        transaction.run(transition_query)
+            departure_station_id = route_point.station_id
+            departure_time = route_point.departure_time
 
     def extract_route(self, data_item, transaction):
         properties = data_item['n'].properties
@@ -173,19 +179,30 @@ class DbAccessor:
 
         result = transaction.run(
             self.MATCH_TRANSITIONS_BY_ROUTE_ID,
-            {'route_id': route.route_id})
+            {'route_id': route.route_id}
+        )
 
         data = result.data()
         if data:
-            for data_item in data:
+            arrival_time = ''
+            for i, data_item in enumerate(data):
                 properties = data_item['r'].properties
-                segment = Segment(properties['agent_type'],
-                                  properties['route_id'],
-                                  properties['segment_id'])
-                self.set_properties(segment, properties)
-                segment.departure_station_id = data_item['departure_station_id']
-                segment.arrival_station_id = data_item['arrival_station_id']
-                route.add_segment(segment)
+                station_id = data_item['departure_station_id']
+
+                route_point = RoutePoint(route.agent_type, route.route_id, station_id)
+                route_point.arrival_time = arrival_time
+                route_point.departure_time = properties['departure_time']
+                route.add_route_point(route_point)
+
+                arrival_time = properties['arrival_time']
+
+                if len(data) - 1 == i:
+                    station_id = data_item['arrival_station_id']
+
+                    route_point = RoutePoint(route.agent_type, route.route_id, station_id)
+                    route_point.arrival_time = arrival_time
+                    route_point.departure_time = ''
+                    route.add_route_point(route_point)
         return route
 
     def extract_station(self, data_item):
@@ -236,7 +253,7 @@ class DbAccessor:
 
         return self.execute(stations_getter, [])
 
-    def find_routes(self, route_number, search_mode, limit):
+    def find_routes_by_route_number(self, route_number, search_mode, limit):
         def routes_getter(transaction):
             routes = []
 
@@ -252,6 +269,44 @@ class DbAccessor:
                     routes.extend(
                         map(lambda data_item: self.extract_route(data_item, transaction), data)
                     )
+            return routes
+
+        return self.execute(routes_getter, [])
+
+    def find_routes_by_station_ids(self, station_ids, limit):
+        def routes_getter(transaction):
+            routes = []
+
+            result = transaction.run(
+                self.MATCH_ROUTE_BY_STATION_IDS,
+                {'station_ids': station_ids, 'limit': limit}
+            )
+            data = result.data()
+            if data:
+                routes.extend(
+                    map(lambda data_item: self.extract_route(data_item, transaction), data)
+                )
+            return routes
+
+        return self.execute(routes_getter, [])
+
+    def find_direct_routes(self, departure_station_ids, arrival_station_ids, limit):
+        def routes_getter(transaction):
+            routes = []
+
+            result = transaction.run(
+                self.MATCH_DIRECT_ROUTES,
+                {'departure_station_ids': departure_station_ids,
+                 'arrival_station_ids': arrival_station_ids,
+                 'limit': limit}
+            )
+            data = result.data()
+            if data:
+                for data_item in data:
+                    route = self.extract_route(data_item, transaction)
+                    departure_route_point = data_item['departure_route_point']
+                    arrival_route_point = data_item['arrival_route_point']
+                    routes.append((route, departure_route_point, arrival_route_point))
             return routes
 
         return self.execute(routes_getter, [])
