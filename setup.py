@@ -21,7 +21,7 @@ setup(
     description="Route Aggregator",
     author_email="alexanderanosov1996@gmail.com",
     url="",
-    keywords=["Route Aggregator API"],
+    keywords=["Route Aggregator"],
     install_requires=REQUIRES,
     packages=find_packages(),
     package_data={'': []},

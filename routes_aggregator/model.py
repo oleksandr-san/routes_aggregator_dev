@@ -1,7 +1,7 @@
 import pickle
 
 from routes_aggregator.utils import time_to_minutes, minutes_to_time
-from routes_aggregator.exceptions import AbsentRoutePointException
+from routes_aggregator.exceptions import AbsentRoutePointException, AbsentPathItemException
 
 
 class ModelAccessor:
@@ -156,6 +156,7 @@ class Route(Entity):
                 point_index=index
             )
 
+
 class RoutePoint(Entity):
 
     def __init__(self, agent_type, route_id, station_id):
@@ -194,6 +195,22 @@ class Path(Entity):
         self.__travel_time = 0
 
     @property
+    def departure_station_id(self):
+        return self.get_path_item(0).departure_point.station_id
+
+    @property
+    def arrival_station_id(self):
+        return self.get_path_item(-1).arrival_point.station_id
+
+    @property
+    def departure_time(self):
+        return self.get_path_item(0).departure_time
+
+    @property
+    def arrival_time(self):
+        return self.get_path_item(-1).arrival_time
+
+    @property
     def travel_time(self):
         return minutes_to_time(self.__travel_time)
 
@@ -218,6 +235,14 @@ class Path(Entity):
         else:
             self.path_items.append(path_item)
         self.__travel_time = self.calculate_travel_time()
+
+    def get_path_item(self, index):
+        try:
+            return self.path_items[index]
+        except IndexError as e:
+            raise AbsentPathItemException(
+                item_index=index
+            )
 
 
 class PathItem(Entity):

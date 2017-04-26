@@ -20,6 +20,16 @@ class AbsentRoutePointException(DomainModelException):
         )
 
 
+class AbsentPathItemException(DomainModelException):
+    def __init__(self, item_index):
+        self.item_index = item_index
+        super().__init__(
+            'absent path item #{}'.format(
+                self.item_index
+            )
+        )
+
+
 class ApplicationException(Exception):
     def __init__(self):
         super().__init__('application internal exception')
