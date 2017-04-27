@@ -260,9 +260,9 @@ class UZAgent(BaseAgent):
 
 class ModelProvider:
 
-    def __init__(self, credentials, logger):
+    def __init__(self, storage_adapter, logger):
         self.agent_types = {'uz': UZAgent, 'uzs': UZSubtrainAgent}
-        self.credentials = credentials
+        self.storage_adapter = storage_adapter
         self.logger = logger
 
     def build_model(self, agent_type):
@@ -272,57 +272,12 @@ class ModelProvider:
         if model_builder:
             model_builder(agent_type, self.logger).build_model(model)
 
-        self.save_model(model, time.strftime("archive/%d.%m.%Y %H:%M"))
+        #self.save_model(model, time.strftime("archive/%d.%m.%Y %H:%M"))
         self.save_model(model, "current")
         return model
 
-    def __get_storage_client(self):
-        try:
-            return boto3.client(
-                's3',
-                aws_access_key_id=self.credentials[0],
-                aws_secret_access_key=self.credentials[1],
-                config=Config(signature_version='s3v4'))
-        except Exception as e:
-            self.logger.error(str(e))
-            return None
-
-    @staticmethod
-    def __prepare_object_name(agent_type, object_name):
-        if not object_name.endswith('/'):
-            object_name += '/'
-        object_name += agent_type + '.data'
-        return object_name
-
     def save_model(self, model, object_name):
-        try:
-            client = self.__get_storage_client()
-            if client:
-                with open('temp.data', 'wb') as fileobj:
-                    model.save_binary(fileobj)
-                with open('temp.data', 'rb') as fileobj:
-                    client.upload_fileobj(
-                        fileobj,
-                        'routes-aggregator',
-                        self.__prepare_object_name(model.agent_type, object_name))
-                os.remove('temp.data')
-        except Exception as e:
-            self.logger.error(str(e))
+        self.storage_adapter.save_model(model, object_name)
 
     def load_model(self, agent_type, object_name):
-        try:
-            model = ModelAccessor()
-            client = self.__get_storage_client()
-            if client:
-                with open('temp.data', 'wb') as fileobj:
-                    client.download_fileobj(
-                        'routes-aggregator',
-                        self.__prepare_object_name(agent_type, object_name),
-                        fileobj)
-                with open('temp.data', 'rb') as fileobj:
-                    model.restore_binary(fileobj)
-                os.remove('temp.data')
-            return model
-        except Exception as e:
-            self.logger.error(str(e))
-            return None
+        return self.storage_adapter.load_model(agent_type, object_name)
