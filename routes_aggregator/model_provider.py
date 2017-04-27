@@ -68,7 +68,7 @@ class UZSubtrainAgent(BaseAgent):
 
                         station.set_station_name(station_name, language)
 
-        self.logger.debug('Station building session - {} stations to build'.format(len(model.stations.values())))
+        self.logger.debug('Station building session - {} station(s) to build'.format(len(model.stations.values())))
         for i, station in enumerate(model.stations.values()):
 
             station_id = station.station_id
@@ -117,7 +117,7 @@ class UZSubtrainAgent(BaseAgent):
                                   "table/tr[2]/td/center/table/tr/td/table/tr[@class=\'on\' or @class=\'onx\']"
         route_table_url = "http://swrailway.gov.ua/timetable/eltrain/?tid={route_id}"
 
-        self.logger.debug('Routes building session - {} routes to build'.format(len(model.routes.values())))
+        self.logger.debug('Routes building session - {} route(s) to build'.format(len(model.routes.values())))
         for i, route in enumerate(model.routes.values()):
             response = self.session.get(route_table_url.format(route_id=route.route_id))
             time.sleep(0.1)
@@ -178,7 +178,7 @@ class UZAgent(BaseAgent):
 
         while stations_to_build or routes_to_build:
 
-            self.logger.debug('Station building session - {} stations to build'.format(len(stations_to_build)))
+            self.logger.debug('Station building session - {} station(s) to build'.format(len(stations_to_build)))
             for i, station_id in enumerate(stations_to_build):
 
                 time.sleep(0.1)
@@ -220,8 +220,9 @@ class UZAgent(BaseAgent):
                             response.status_code, response.reason)
                         )
             stations_to_build.clear()
+            return
 
-            self.logger.debug('Routes building session - {} routes to build'.format(len(routes_to_build)))
+            self.logger.debug('Routes building session - {} route(s) to build'.format(len(routes_to_build)))
             for i, route_id in enumerate(routes_to_build):
 
                 route = model.find_route(route_id)
@@ -288,7 +289,7 @@ class ModelProvider:
         if model_builder:
             model_builder(agent_type, self.logger).build_model(model)
 
-        self.save_model(model, time.strftime("archive/%d.%m.%Y %H:%M"))
+        self.save_model(model, time.strftime("archive/%d.%m.%Y"))
         self.save_model(model, "current")
         return model
 

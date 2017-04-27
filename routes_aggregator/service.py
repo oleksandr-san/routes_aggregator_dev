@@ -39,6 +39,7 @@ class Service:
     def init_logger(logger_name, config):
 
         logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.DEBUG)
 
         if 'error_log_path' in config:
             error_handler = logging.FileHandler(config['error_log_path'])
