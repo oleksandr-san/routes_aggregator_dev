@@ -25,3 +25,14 @@ def time_to_minutes(time):
 def minutes_to_time(minutes):
     h, m = divmod(minutes, 60)
     return '{:02d}:{:02d}'.format(abs(h), abs(m))
+
+
+def read_config_file(file_path):
+    config = {}
+    with open(file_path, 'r') as file:
+        for line in file:
+            if not line.startswith('#'):
+                components = line.split('=', 1)
+                if len(components) == 2:
+                    config[components[0].strip()] = components[1].strip()
+    return config

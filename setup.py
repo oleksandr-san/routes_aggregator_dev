@@ -19,7 +19,7 @@ setup(
     name=NAME,
     version=VERSION,
     description="Route Aggregator",
-    author_email="alexanderanosov1996@gmail.com",
+    author_email="alexanderanosov31@gmail.com",
     url="",
     keywords=["Route Aggregator"],
     install_requires=REQUIRES,

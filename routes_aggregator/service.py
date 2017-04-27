@@ -3,7 +3,7 @@ import logging
 from routes_aggregator.db_accessor import DbAccessor
 from routes_aggregator.exceptions import ApplicationException
 from routes_aggregator.model_provider import ModelProvider
-from routes_aggregator.utils import singleton
+from routes_aggregator.utils import singleton, read_config_file
 from routes_aggregator.storage_adapter import FilesystemStorageAdapter
 
 
@@ -20,22 +20,41 @@ def shielded_execute(executor):
 class Service:
 
     def __init__(self, *args, **kwargs):
-        logger = logging.getLogger("routes_aggregator")
-        fh = logging.FileHandler('routes_aggregator.log')
-        fh.setLevel(logging.INFO)
-        fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
+        if 'config_path' in kwargs:
+            config = read_config_file(kwargs['config_path'])
+        else:
+            config = kwargs
 
+        logger = self.init_logger('routes-aggregator', config)
         self.db_accessor = DbAccessor(
-            (kwargs['db_user'], kwargs['db_password']),
+            (config['db_user'], config['db_password']),
+            logger
+        )
+        self.model_provider = ModelProvider(
+            FilesystemStorageAdapter(config['storage_path']),
             logger
         )
 
-        self.model_provider = ModelProvider(
-            FilesystemStorageAdapter(kwargs['base_storage_path']),
-            logger
-        )
+    @staticmethod
+    def init_logger(logger_name, config):
+
+        logger = logging.getLogger(logger_name)
+
+        if 'error_log_path' in config:
+            error_handler = logging.FileHandler(config['error_log_path'])
+            error_handler.setLevel(logging.ERROR)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            error_handler.setFormatter(formatter)
+            logger.addHandler(error_handler)
+
+        if 'debug_log_path' in config:
+            debug_handler = logging.FileHandler(config['debug_log_path'])
+            debug_handler.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            debug_handler.setFormatter(formatter)
+            logger.addHandler(debug_handler)
+
+        return logger
 
     @shielded_execute
     def get_station(self, station_id, language):
