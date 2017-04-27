@@ -340,7 +340,7 @@ class DbAccessor:
                         arrival_route_point = second_connection.properties['station_number']
                         path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
                     paths.append(path)
-            return paths
+            return sorted(paths, key=lambda path: path.raw_travel_time)
 
         return self.execute(routes_getter, [])
 
@@ -376,7 +376,7 @@ class DbAccessor:
                         arrival_route_point = transition_number + 1
                         path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
                     paths.append(path)
-            return paths
+            return sorted(paths, key=lambda path: path.raw_travel_time)
 
         return self.execute(routes_getter, [])
 

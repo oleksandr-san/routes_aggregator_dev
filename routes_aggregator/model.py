@@ -1,6 +1,6 @@
 import pickle
 
-from routes_aggregator.utils import time_to_minutes, minutes_to_time
+from routes_aggregator.utils import *
 from routes_aggregator.exceptions import AbsentRoutePointException, AbsentPathItemException
 
 
@@ -135,8 +135,9 @@ class Route(Entity):
 
     @property
     def travel_time(self):
-        return minutes_to_time(abs(time_to_minutes(self.arrival_time) -
-                                   time_to_minutes(self.departure_time)))
+        return minutes_to_time(
+            self.calculate_travel_time(0, len(self.route_points) - 1)
+        )
 
     def set_periodicity(self, periodicity, language):
         self.set_property("periodicity", language, periodicity)
@@ -155,6 +156,25 @@ class Route(Entity):
                 route_id=self.route_id,
                 point_index=index
             )
+
+    def calculate_travel_time(self, departure_point_idx, arrival_point_idx):
+        minutes = 0
+        previous_departure_time = None
+        for index in range(departure_point_idx, arrival_point_idx):
+            point = self.get_route_point(index)
+            if previous_departure_time is not None:
+                segment_time = calculate_raw_time_difference(
+                    previous_departure_time,
+                    point.arrival_time
+                )
+                minutes += segment_time + point.raw_stop_time
+            previous_departure_time = point.departure_time
+        if previous_departure_time:
+            minutes += calculate_raw_time_difference(
+                previous_departure_time,
+                self.get_route_point(arrival_point_idx).arrival_time
+            )
+        return minutes
 
 
 class RoutePoint(Entity):
@@ -180,10 +200,22 @@ class RoutePoint(Entity):
     @property
     def stop_time(self):
         if self.arrival_time and self.departure_time:
-            return minutes_to_time(abs(time_to_minutes(self.departure_time) -
-                                       time_to_minutes(self.arrival_time)))
+            return calculate_time_difference(
+                self.arrival_time,
+                self.departure_time
+            )
         else:
             return ''
+
+    @property
+    def raw_stop_time(self):
+        if self.arrival_time and self.departure_time:
+            return calculate_raw_time_difference(
+                self.arrival_time,
+                self.departure_time
+            )
+        else:
+            return 0
 
 
 class Path(Entity):
@@ -192,7 +224,7 @@ class Path(Entity):
         super().__init__()
 
         self.path_items = []
-        self.__travel_time = 0
+        self.__raw_travel_time = 0
 
     @property
     def departure_station_id(self):
@@ -212,20 +244,23 @@ class Path(Entity):
 
     @property
     def travel_time(self):
-        return minutes_to_time(self.__travel_time)
+        return minutes_to_time(self.raw_travel_time)
 
     @property
-    def travel_time_in_minutes(self):
-        return self.__travel_time
+    def raw_travel_time(self):
+        return self.__raw_travel_time
 
-    def calculate_travel_time(self):
+    def __calculate_travel_time(self):
         minutes = 0
         previous_path_item = None
         for path_item in self.path_items:
             if previous_path_item is not None:
-                minutes += abs(time_to_minutes(previous_path_item.arrival_time) -
-                               time_to_minutes(path_item.departure_time))
-            minutes += path_item.calculate_travel_time()
+                minutes += calculate_raw_time_difference(
+                    previous_path_item.arrival_time,
+                    path_item.departure_time
+                )
+            minutes += path_item.raw_travel_time
+            previous_path_item = path_item
         return minutes
 
     def add_path_item(self, path_item):
@@ -234,7 +269,7 @@ class Path(Entity):
             self.path_items[-1].arrival_point_idx = path_item.arrival_point_idx
         else:
             self.path_items.append(path_item)
-        self.__travel_time = self.calculate_travel_time()
+        self.__raw_travel_time = self.__calculate_travel_time()
 
     def get_path_item(self, index):
         try:
@@ -254,6 +289,11 @@ class PathItem(Entity):
         self.departure_point_idx = departure_point_idx
         self.arrival_point_idx = arrival_point_idx
 
+        self.__raw_travel_time = self.route.calculate_travel_time(
+            self.departure_point_idx,
+            self.arrival_point_idx
+        )
+
     @property
     def departure_point(self):
         return self.route.get_route_point(self.departure_point_idx)
@@ -272,10 +312,8 @@ class PathItem(Entity):
 
     @property
     def travel_time(self):
-        return minutes_to_time(self.calculate_travel_time())
+        return minutes_to_time(self.raw_travel_time)
 
-    def calculate_travel_time(self):
-        return abs(time_to_minutes(self.arrival_time) -
-                   time_to_minutes(self.departure_time))
-
-
+    @property
+    def raw_travel_time(self):
+        return self.__raw_travel_time

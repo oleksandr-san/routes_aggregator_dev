@@ -36,3 +36,17 @@ def read_config_file(file_path):
                 if len(components) == 2:
                     config[components[0].strip()] = components[1].strip()
     return config
+
+
+def calculate_raw_time_difference(first, second):
+    first_minutes = time_to_minutes(first)
+    second_minutes = time_to_minutes(second)
+
+    if first_minutes <= second_minutes:
+        return second_minutes - first_minutes
+    else:
+        return 1440 - first_minutes + second_minutes
+
+
+def calculate_time_difference(first, second):
+    return minutes_to_time(calculate_raw_time_difference(first, second))
