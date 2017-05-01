@@ -1,4 +1,5 @@
 import logging
+import sys
 
 from routes_aggregator.db_accessor import DbAccessor
 from routes_aggregator.exceptions import ApplicationException
@@ -40,6 +41,12 @@ class Service:
 
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.DEBUG)
+
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        stdout_handler.setFormatter(formatter)
+        logger.addHandler(stdout_handler)
 
         if 'error_log_path' in config:
             error_handler = logging.FileHandler(config['error_log_path'])
