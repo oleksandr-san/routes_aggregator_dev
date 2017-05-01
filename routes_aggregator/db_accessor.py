@@ -412,11 +412,16 @@ class DbAccessor:
 
     def build_model(self, model):
         def model_builder(transaction):
+
+            self.logger.debug('DbAccessor: building \'{}\' model'.format(model.agent_type))
+
             self.remove_model(model.agent_type, transaction)
             for station in model.stations.values():
                 self.create_station(station, transaction)
             for route in model.routes.values():
                 self.create_route(route, transaction)
+
+            self.logger.debug('DbAccessor: built \'{}\' model'.format(model.agent_type))
 
         self.execute(model_builder)
 

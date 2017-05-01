@@ -29,11 +29,15 @@ class UZSubtrainAgent(BaseAgent):
         self.language_map = {"ua": "", "ru": "_ru", "en": "_en"}
 
     def build_model(self, model):
-        self.logger.debug('Building model \'{}\''.format(self.agent_type))
+        self.logger.debug('ModelProvider: Building model \'{}\''.format(self.agent_type))
 
         model.agent_type = self.agent_type
         self.build_stations(model)
         self.build_routes(model)
+
+        self.logger.debug('ModelProvider: Built model \'{}\', {} station(s), {} route(s)'.format(
+            self.agent_type, len(model.stations), len(model.routes))
+        )
 
     def build_stations(self, model):
 
@@ -68,7 +72,10 @@ class UZSubtrainAgent(BaseAgent):
 
                         station.set_station_name(station_name, language)
 
-        self.logger.debug('Station building session - {} station(s) to build'.format(len(model.stations.values())))
+        self.logger.debug('ModelProvider: Station building session - {} station(s) to build'.format(
+            len(model.stations.values()))
+        )
+
         for i, station in enumerate(model.stations.values()):
 
             station_id = station.station_id
@@ -108,7 +115,7 @@ class UZSubtrainAgent(BaseAgent):
                                     station.set_state_name(location_parameters[0].strip(), language)
                                     station.set_country_name(location_parameters[1].strip(), language)
                 else:
-                    self.logger.debug('Response state unacceptable: {} {}'.format(
+                    self.logger.debug('ModelProvider: Response state unacceptable: {} {}'.format(
                         response.status_code, response.reason)
                     )
 
@@ -117,7 +124,10 @@ class UZSubtrainAgent(BaseAgent):
                                   "table/tr[2]/td/center/table/tr/td/table/tr[@class=\'on\' or @class=\'onx\']"
         route_table_url = "http://swrailway.gov.ua/timetable/eltrain/?tid={route_id}"
 
-        self.logger.debug('Routes building session - {} route(s) to build'.format(len(model.routes.values())))
+        self.logger.debug('ModelProvider: Routes building session - {} route(s) to build'.format(
+            len(model.routes.values()))
+        )
+
         for i, route in enumerate(model.routes.values()):
             response = self.session.get(route_table_url.format(route_id=route.route_id))
             time.sleep(0.1)
@@ -140,7 +150,7 @@ class UZSubtrainAgent(BaseAgent):
                                 route_point.departure_time = self.prepare_time(children[3].text)
                                 route.add_route_point(route_point)
             else:
-                self.logger.debug('Response state unacceptable: {} {}'.format(
+                self.logger.debug('ModelProvider: Response state unacceptable: {} {}'.format(
                     response.status_code, response.reason)
                 )
 
@@ -153,10 +163,14 @@ class UZAgent(BaseAgent):
         self.language_map = {"ua": "", "en": "en"}
 
     def build_model(self, model):
-        self.logger.debug('Building model \'{}\''.format(self.agent_type))
+        self.logger.debug('ModelProvider: Building model \'{}\''.format(self.agent_type))
 
         model.agent_type = self.agent_type
         self.build_stations(model)
+
+        self.logger.debug('ModelProvider: Built model \'{}\', {} station(s), {} route(s)'.format(
+            self.agent_type, len(model.stations), len(model.routes))
+        )
 
     def build_stations(self, model):
 
@@ -178,7 +192,10 @@ class UZAgent(BaseAgent):
 
         while stations_to_build or routes_to_build:
 
-            self.logger.debug('Station building session - {} station(s) to build'.format(len(stations_to_build)))
+            self.logger.debug('ModelProvider: Station building session - {} station(s) to build'.format(
+                len(stations_to_build))
+            )
+
             for i, station_id in enumerate(stations_to_build):
 
                 time.sleep(0.1)
@@ -216,12 +233,15 @@ class UZAgent(BaseAgent):
                                         model.add_route(route)
                                         routes_to_build.add(route_id)
                     else:
-                        self.logger.debug('Response state unacceptable: {} {}'.format(
+                        self.logger.debug('ModelProvider: Response state unacceptable: {} {}'.format(
                             response.status_code, response.reason)
                         )
             stations_to_build.clear()
 
-            self.logger.debug('Routes building session - {} route(s) to build'.format(len(routes_to_build)))
+            self.logger.debug('ModelProvider: Routes building session - {} route(s) to build'.format(
+                len(routes_to_build))
+            )
+
             for i, route_id in enumerate(routes_to_build):
 
                 route = model.find_route(route_id)
