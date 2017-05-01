@@ -59,6 +59,15 @@ class Entity:
     def prepare_property(name, language):
         return name + "_" + language
 
+    @staticmethod
+    def extract_property(getter, language):
+        property = getter(language)
+        if not property:
+            property = getter('en')
+        if not property:
+            property = getter('ua')
+        return property
+
 
 class Station(Entity):
 

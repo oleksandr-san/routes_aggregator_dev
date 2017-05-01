@@ -220,7 +220,6 @@ class UZAgent(BaseAgent):
                             response.status_code, response.reason)
                         )
             stations_to_build.clear()
-            return
 
             self.logger.debug('Routes building session - {} route(s) to build'.format(len(routes_to_build)))
             for i, route_id in enumerate(routes_to_build):

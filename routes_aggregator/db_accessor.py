@@ -28,6 +28,34 @@ class DbAccessor:
     MATCH_BY_PARAMETER_REGEX = "MATCH (n:{label}) WHERE n.{property_name} " \
                                "=~ $property_value RETURN n LIMIT $limit"
 
+    MATCH_BY_PARAMETER_QUERY_MAP = {
+        "STARTS_WITH": MATCH_BY_PARAMETER_STARTS_WITH,
+        "STRICT": MATCH_BY_PARAMETER_STRICT,
+        "REGEX": MATCH_BY_PARAMETER_REGEX
+    }
+
+    MATCH_STATION_BY_NAME_STARTS_WITH = "MATCH (n:Station) WHERE " \
+                                        "LOWER(n.station_name_ua) STARTS WITH LOWER($property_value) OR " \
+                                        "LOWER(n.station_name_en) STARTS WITH LOWER($property_value) OR " \
+                                        "LOWER(n.station_name_ru) STARTS WITH LOWER($property_value) " \
+                                        "RETURN n LIMIT $limit"
+    MATCH_STATION_BY_NAME_STRICT = "MATCH (n:Station) WHERE " \
+                                   "LOWER(n.station_name_ua) = LOWER($property_value) OR " \
+                                   "LOWER(n.station_name_en) = LOWER($property_value) OR " \
+                                   "LOWER(n.station_name_ru) = LOWER($property_value) " \
+                                   "RETURN n LIMIT $limit"
+    MATCH_STATION_BY_NAME_REGEX = "MATCH (n:Station) WHERE " \
+                                  "n.station_name_ua =~ $property_value OR " \
+                                  "n.station_name_en =~ $property_value OR " \
+                                  "n.station_name_ru =~ $property_value " \
+                                  "RETURN n LIMIT $limit"
+
+    MATCH_STATION_BY_NAME_QUERY_MAP = {
+        "STARTS_WITH": MATCH_STATION_BY_NAME_STARTS_WITH,
+        "STRICT": MATCH_STATION_BY_NAME_STRICT,
+        "REGEX": MATCH_STATION_BY_NAME_REGEX
+    }
+
     MATCH_ROUTE_BY_DOMAIN_ID = "MATCH (n:Route) WHERE n.domain_id = $domain_id RETURN n"
     MATCH_ROUTE_BY_STATION_IDS = "MATCH (s:Station)-[r:ROUTE_CONNECTION]->(n:Route) " \
                                  "WHERE s.domain_id in $station_ids " \
@@ -46,17 +74,12 @@ class DbAccessor:
                            "AND s2.domain_id in $arrival_station_ids " \
                            "RETURN relationships(n) as transitions LIMIT $limit"
 
-    SEARCH_QUERY_MAP = {
-        "STARTS_WITH": MATCH_BY_PARAMETER_STARTS_WITH,
-        "STRICT": MATCH_BY_PARAMETER_STRICT,
-        "REGEX": MATCH_BY_PARAMETER_REGEX
-    }
-
     MATCH_PART_BEGIN = "MATCH (s1:Station)-[r1:ROUTE_CONNECTION]->(n1:Route)"
     MATCH_PART_END = "<-[r{}:ROUTE_CONNECTION]-(s{}:Station) "
     MATCH_PART_PATTERN = "<-[r{}:ROUTE_CONNECTION]-(s{}:Station)-[r{}:ROUTE_CONNECTION]->(n{}:Route)"
 
-    WHERE_PART = "WHERE s1.domain_id in $departure_station_ids and s{}.domain_id in $arrival_station_ids "
+    WHERE_PART_BEGIN = "WHERE s1.domain_id in $station_ids_1 "
+    WHERE_PART_PATTERN = "and s{id}.domain_id in $station_ids_{id} "
     CONDITION_PART = "and toInteger(r{}.station_number) < toInteger(r{}.station_number) "
 
     RETURN_PART_BEGIN = "RETURN DISTINCT r1, n1, r2"
@@ -248,13 +271,12 @@ class DbAccessor:
         def stations_getter(transaction):
             stations = []
 
-            query_template = self.SEARCH_QUERY_MAP.get(search_mode.upper())
+            query_template = self.MATCH_STATION_BY_NAME_QUERY_MAP.get(search_mode.upper())
             if query_template:
                 result = transaction.run(
-                    query_template.format(
-                        label='Station',
-                        property_name=Entity.prepare_property('station_name', language)),
-                    {'property_value': station_name, 'limit': limit})
+                    query_template,
+                    {'property_value': station_name, 'limit': limit}
+                )
                 data = result.data()
                 if data:
                     stations.extend(map(lambda data_item: self.extract_station(data_item), data))
@@ -266,13 +288,14 @@ class DbAccessor:
         def routes_getter(transaction):
             routes = []
 
-            query_template = self.SEARCH_QUERY_MAP.get(search_mode.upper())
+            query_template = self.MATCH_BY_PARAMETER_QUERY_MAP.get(search_mode.upper())
             if query_template:
                 result = transaction.run(
                     query_template.format(
                         label='Route',
                         property_name='route_number'),
-                    {'property_value': route_number, 'limit': limit})
+                    {'property_value': route_number, 'limit': limit}
+                )
                 data = result.data()
                 if data:
                     routes.extend(
@@ -299,33 +322,40 @@ class DbAccessor:
 
         return self.execute(routes_getter, [])
 
-    def __generate_match_paths_query(self, transfers_count):
+    def __generate_match_paths_query(self, transfers_count, use_intermediate_stations=False):
         match_part = self.MATCH_PART_BEGIN
-        condition_part = self.WHERE_PART.format(transfers_count + 2) + self.CONDITION_PART.format(1, 2)
+        where_part = self.WHERE_PART_BEGIN + self.WHERE_PART_PATTERN.format(id=transfers_count + 2)
+        condition_part = self.CONDITION_PART.format(1, 2)
         return_part = self.RETURN_PART_BEGIN
 
         for i in range(transfers_count):
             match_part += self.MATCH_PART_PATTERN.format(2 * i + 2, i + 2, 2 * i + 3, i + 2)
             condition_part += self.CONDITION_PART.format(2 * i + 3, 2 * i + 4)
+            if use_intermediate_stations:
+                where_part += self.WHERE_PART_PATTERN.format(id=i + 2)
             return_part += self.RETURN_PART_PATTERN.format(2 * i + 3, i + 2, 2 * i + 4)
 
         match_part += self.MATCH_PART_END.format(2 * transfers_count + 2, transfers_count + 2)
         return_part += self.RETURN_PART_END
 
-        return match_part + condition_part + return_part
+        return match_part + where_part + condition_part + return_part
 
-    def find_paths(self, departure_station_ids, arrival_station_ids,
-                   transfers_count, limit):
+    def find_paths(self, station_ids, use_intermediate_stations, limit):
 
         def routes_getter(transaction):
             paths = []
 
-            result = transaction.run(
-                self.__generate_match_paths_query(transfers_count),
-                {'departure_station_ids': departure_station_ids,
-                 'arrival_station_ids': arrival_station_ids,
-                 'limit': limit}
+            transfers_count = len(station_ids) - 2
+            paths_query = self.__generate_match_paths_query(
+                transfers_count,
+                use_intermediate_stations
             )
+
+            parameters = {'limit': limit}
+            for i, ids in enumerate(station_ids):
+                parameters['station_ids_{}'.format(i + 1)] = ids
+
+            result = transaction.run(paths_query, parameters)
             data = result.data()
             if data:
                 for data_item in data:
@@ -340,7 +370,7 @@ class DbAccessor:
                         arrival_route_point = second_connection.properties['station_number']
                         path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
                     paths.append(path)
-            return sorted(paths, key=lambda path: path.raw_travel_time)
+            return paths
 
         return self.execute(routes_getter, [])
 
@@ -376,7 +406,7 @@ class DbAccessor:
                         arrival_route_point = transition_number + 1
                         path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
                     paths.append(path)
-            return sorted(paths, key=lambda path: path.raw_travel_time)
+            return paths
 
         return self.execute(routes_getter, [])
 

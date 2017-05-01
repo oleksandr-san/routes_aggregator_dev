@@ -83,18 +83,20 @@ class Service:
             )
 
     @shielded_execute
-    def find_paths(self, departure_station_ids, arrival_station_ids, search_mode=None,
-                   transfers_count=None, max_transitions_count=None, limit=None):
-        if not search_mode or search_mode.upper() == "REGULAR":
-            return self.db_accessor.find_paths(
-                departure_station_ids, arrival_station_ids,
-                transfers_count, limit
-            )
-        else:
+    def find_paths(self, station_ids, search_mode=None,
+                   use_strict_intermediate_stations=None,
+                   max_transitions_count=None, limit=None):
+        search_mode = search_mode.upper() if search_mode else "REGULAR"
+
+        if search_mode == "REGULAR":
+            return self.db_accessor.find_paths(station_ids, use_strict_intermediate_stations, limit)
+        elif search_mode == "TRANSITIONS":
             return self.db_accessor.find_shortest_paths(
-                departure_station_ids, arrival_station_ids,
+                station_ids[0], station_ids[-1],
                 max_transitions_count, limit
             )
+        else:
+            return []
 
     @shielded_execute
     def request_model_update(self, agent_type, build_model):
