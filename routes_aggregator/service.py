@@ -69,34 +69,35 @@ class Service:
         return self.db_accessor.get_station(station_id)
 
     @shielded_execute
-    def find_stations(self, station_name, language,
+    def find_stations(self, station_names, language,
                       search_mode=None, limit=None):
-        return self.db_accessor.find_stations(station_name, language, search_mode, limit)
+        return self.db_accessor.find_stations(station_names, language, search_mode, limit)
 
     @shielded_execute
     def get_route(self, route_id, language):
         return self.db_accessor.get_route(route_id)
 
     @shielded_execute
-    def find_routes(self, language, route_number=None,
+    def find_routes(self, language, route_numbers=None,
                     station_ids=None, search_mode=None, limit=None):
-        if route_number:
-            return self.db_accessor.find_routes_by_route_number(
-                route_number, search_mode, limit
+        if route_numbers:
+            return self.db_accessor.find_routes_by_route_numbers(
+                route_numbers, search_mode, limit
             )
-        else:
+        elif station_ids:
             return self.db_accessor.find_routes_by_station_ids(
                 station_ids, limit
             )
+        else:
+            return []
 
     @shielded_execute
     def find_paths(self, station_ids, search_mode=None,
-                   use_strict_intermediate_stations=None,
                    max_transitions_count=None, limit=None):
         search_mode = search_mode.upper() if search_mode else "REGULAR"
 
         if search_mode == "REGULAR":
-            return self.db_accessor.find_paths(station_ids, use_strict_intermediate_stations, limit)
+            return self.db_accessor.find_paths(station_ids, limit)
         elif search_mode == "TRANSITIONS":
             return self.db_accessor.find_shortest_paths(
                 station_ids[0], station_ids[-1],
