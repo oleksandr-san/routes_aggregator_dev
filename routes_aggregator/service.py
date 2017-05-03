@@ -94,9 +94,9 @@ class Service:
     @shielded_execute
     def find_paths(self, station_ids, search_mode=None,
                    max_transitions_count=None, limit=None):
-        search_mode = search_mode.upper() if search_mode else "REGULAR"
+        search_mode = search_mode.upper() if search_mode else "SIMPLE"
 
-        if search_mode == "REGULAR":
+        if search_mode == "SIMPLE":
             return self.db_accessor.find_paths(station_ids, limit)
         elif search_mode == "TRANSITIONS":
             return self.db_accessor.find_shortest_paths(
