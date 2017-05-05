@@ -25,11 +25,11 @@ def service_test():
 
     Service(config_path=args.config_path)
 
-    #Service().request_model_update('uz', True)
-    #Service().request_model_update('uzs', True)
-    r = Service().find_paths([['uz22100'], ['uz22430'], ['uz24110']], "TRANSITIONS",
-                             use_strict_intermediate_stations=False,
-                             max_transitions_count=4, limit=10)
+    Service().request_model_update('uz', False)
+    Service().request_model_update('uzs', False)
+    #r = Service().find_paths([['uz22100'], ['uz22430'], ['uz24110']], "TRANSITIONS",
+    #                         use_strict_intermediate_stations=False,
+    #                         max_transitions_count=4, limit=10)
     print(r)
 
 language_property_test()
