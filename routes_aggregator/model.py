@@ -326,3 +326,7 @@ class PathItem(Entity):
     @property
     def raw_travel_time(self):
         return self.__raw_travel_time
+
+    def browse_route_points(self):
+        for i in range(self.departure_point_idx, self.arrival_point_idx + 1):
+            yield self.route.get_route_point(i)

@@ -3,6 +3,7 @@ import itertools
 from neo4j.v1 import GraphDatabase, basic_auth, CypherError, DatabaseError
 
 from routes_aggregator.model import Entity, Station, Route, RoutePoint, Path, PathItem
+from routes_aggregator.utils import time_to_minutes
 
 
 class MatchByParametersQueryGenerator:
@@ -93,7 +94,7 @@ class DbAccessor:
     MATCH_ROUTE_BY_DOMAIN_ID = "MATCH (n:Route) WHERE n.domain_id = $domain_id RETURN n"
     MATCH_ROUTE_BY_STATION_IDS = "MATCH (s:Station)-[r:ROUTE_CONNECTION]->(n:Route) " \
                                  "WHERE s.domain_id in $station_ids " \
-                                 "RETURN DISTINCT n ORDER BY n.route_number LIMIT $limit"
+                                 "RETURN DISTINCT n, r ORDER BY r.raw_route_start_time LIMIT $limit"
 
     MATCH_TRANSITIONS_BY_ROUTE_ID = "MATCH (s1:Station)" \
                                     "-[r:TRANSITION { route_id: $route_id }]->" \
@@ -118,6 +119,8 @@ class DbAccessor:
 
         self.paths_query_generator = MatchPathsQueryGenerator()
         self.params_query_generator = MatchByParametersQueryGenerator()
+
+        self.station_cache = {}
 
     @staticmethod
     def prepare_property(value):
@@ -198,9 +201,16 @@ class DbAccessor:
         transaction_number = 0
 
         for i, route_point in enumerate(route.route_points):
+            raw_route_start_time = time_to_minutes(
+                route_point.arrival_time
+                if route_point.arrival_time
+                else route_point.departure_time
+            )
+
             properties = {
                 'agent_type': route.agent_type,
-                'station_number': i
+                'station_number': i,
+                'raw_route_start_time': raw_route_start_time
             }
 
             route_connection_query = self.CREATE_ROUTE_CONNECTION.format(
@@ -278,7 +288,14 @@ class DbAccessor:
         return None
 
     def get_station(self, domain_id):
-        return self.execute(lambda transaction: self.__get_station(domain_id, transaction))
+        station = self.station_cache.get(domain_id)
+        if station:
+            return station
+
+        station = self.execute(lambda transaction: self.__get_station(domain_id, transaction))
+        if station:
+            self.station_cache[domain_id] = station
+        return station
 
     def __get_route(self, domain_id, transaction):
         result = transaction.run(
@@ -292,7 +309,7 @@ class DbAccessor:
     def get_route(self, domain_id):
         return self.execute(lambda transaction: self.__get_route(domain_id, transaction))
 
-    def find_stations(self, station_names, language, search_mode, limit):
+    def find_stations(self, station_names, search_mode, limit):
         def stations_getter(transaction):
             stations = []
 
@@ -307,6 +324,10 @@ class DbAccessor:
                 data = result.data()
                 if data:
                     stations.extend(map(lambda data_item: self.extract_station(data_item), data))
+
+                    for station in stations:
+                        self.station_cache[station.domain_id] = station
+
             return stations
 
         return self.execute(stations_getter, [])
@@ -422,6 +443,7 @@ class DbAccessor:
             self.logger.debug('DbAccessor: building \'{}\' model'.format(model.agent_type))
 
             self.remove_model(model.agent_type, transaction)
+            self.station_cache.clear()
             for station in model.stations.values():
                 self.create_station(station, transaction)
             for route in model.routes.values():

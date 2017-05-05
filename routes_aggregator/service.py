@@ -65,31 +65,37 @@ class Service:
         return logger
 
     @shielded_execute
-    def get_station(self, station_id, language):
+    def get_station(self, station_id):
         return self.db_accessor.get_station(station_id)
 
     @shielded_execute
-    def find_stations(self, station_names, language,
-                      search_mode=None, limit=None):
-        return self.db_accessor.find_stations(station_names, language, search_mode, limit)
+    def find_stations(self, station_names, search_mode=None, limit=None):
+        return self.db_accessor.find_stations(station_names, search_mode, limit)
 
     @shielded_execute
-    def get_route(self, route_id, language):
+    def get_route(self, route_id):
         return self.db_accessor.get_route(route_id)
 
     @shielded_execute
-    def find_routes(self, language, route_numbers=None,
-                    station_ids=None, search_mode=None, limit=None):
+    def find_routes(self, route_numbers=None, station_ids=None,
+                    search_mode=None, limit=None):
+        routes = []
+
         if route_numbers:
-            return self.db_accessor.find_routes_by_route_numbers(
-                route_numbers, search_mode, limit
+            routes.extend(
+                self.db_accessor.find_routes_by_route_numbers(
+                    route_numbers, search_mode, limit
+                )
             )
-        elif station_ids:
-            return self.db_accessor.find_routes_by_station_ids(
-                station_ids, limit
+
+        if station_ids:
+            routes.extend(
+                self.db_accessor.find_routes_by_station_ids(
+                    station_ids, limit
+                )
             )
-        else:
-            return []
+
+        return routes
 
     @shielded_execute
     def find_paths(self, station_ids, search_mode=None,
