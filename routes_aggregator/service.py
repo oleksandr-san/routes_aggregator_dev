@@ -8,11 +8,15 @@ from routes_aggregator.utils import singleton, read_config_file
 from routes_aggregator.storage_adapter import FilesystemStorageAdapter
 
 
+logger = logging.getLogger('routes-aggregator')
+
+
 def shielded_execute(executor):
     def shielded_executor(*args, **kwargs):
         try:
             return executor(*args, **kwargs)
         except Exception as e:
+            logger.error(str(e))
             raise ApplicationException()
     return shielded_executor
 
@@ -26,7 +30,8 @@ class Service:
         else:
             config = kwargs
 
-        logger = self.init_logger('routes-aggregator', config)
+        self.init_logger(logger, config)
+
         self.db_accessor = DbAccessor(
             (config['db_user'], config['db_password']),
             logger
@@ -37,9 +42,8 @@ class Service:
         )
 
     @staticmethod
-    def init_logger(logger_name, config):
+    def init_logger(logger, config):
 
-        logger = logging.getLogger(logger_name)
         logger.setLevel(logging.DEBUG)
 
         stdout_handler = logging.StreamHandler(sys.stdout)
