@@ -9,7 +9,7 @@ from routes_aggregator.utils import time_to_minutes
 class MatchByParametersQueryGenerator:
 
     MATCH_PART = "MATCH (n:{label}) WHERE "
-    RETURN_PART = "RETURN n LIMIT $limit"
+    RETURN_PART = "RETURN DISTINCT n LIMIT $limit"
 
     QUERY_PATTERN_MAP = {
         "STARTS_WITH": "LOWER(n.{}) STARTS WITH LOWER({})",
@@ -121,6 +121,7 @@ class DbAccessor:
         self.params_query_generator = MatchByParametersQueryGenerator()
 
         self.station_cache = {}
+        self.routes_cache = {}
 
     @staticmethod
     def prepare_property(value):
@@ -241,12 +242,24 @@ class DbAccessor:
 
     def extract_station(self, data_item):
         properties = data_item['n'].properties
+
+        station = self.station_cache.get(properties.get('domain_id'))
+        if station:
+            return station
+
         station = Station(properties['agent_type'], properties['station_id'])
         self.set_properties(station, properties)
+
+        self.station_cache[station.domain_id] = station
         return station
 
     def extract_route(self, data_item, transaction, node_name='n'):
         properties = data_item[node_name].properties
+
+        route = self.routes_cache.get(properties.get('domain_id'))
+        if route:
+            return route
+
         route = Route(properties['agent_type'], properties['route_id'])
         self.set_properties(route, properties)
 
@@ -276,6 +289,8 @@ class DbAccessor:
                     route_point.arrival_time = arrival_time
                     route_point.departure_time = ''
                     route.add_route_point(route_point)
+
+        self.routes_cache[route.domain_id] = route
         return route
 
     def __get_station(self, domain_id, transaction):
@@ -291,11 +306,7 @@ class DbAccessor:
         station = self.station_cache.get(domain_id)
         if station:
             return station
-
-        station = self.execute(lambda transaction: self.__get_station(domain_id, transaction))
-        if station:
-            self.station_cache[domain_id] = station
-        return station
+        return self.execute(lambda transaction: self.__get_station(domain_id, transaction))
 
     def __get_route(self, domain_id, transaction):
         result = transaction.run(
@@ -307,6 +318,9 @@ class DbAccessor:
         return None
 
     def get_route(self, domain_id):
+        route = self.routes_cache.get(domain_id)
+        if route:
+            return route
         return self.execute(lambda transaction: self.__get_route(domain_id, transaction))
 
     def find_stations(self, station_names, search_mode, limit):

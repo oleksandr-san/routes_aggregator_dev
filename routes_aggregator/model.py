@@ -236,12 +236,12 @@ class Path(Entity):
         self.__raw_travel_time = 0
 
     @property
-    def departure_station_id(self):
-        return self.get_path_item(0).departure_point.station_id
+    def departure_point(self):
+        return self.get_path_item(0).departure_point
 
     @property
-    def arrival_station_id(self):
-        return self.get_path_item(-1).arrival_point.station_id
+    def arrival_point(self):
+        return self.get_path_item(-1).arrival_point
 
     @property
     def departure_time(self):
