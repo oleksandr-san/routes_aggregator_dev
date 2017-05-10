@@ -106,7 +106,9 @@ class Service:
         search_mode = search_mode.upper() if search_mode else "SIMPLE"
 
         if search_mode == "SIMPLE":
-            return self.db_accessor.find_paths(station_ids, limit)
+            return self.db_accessor.find_paths_with_single_route(station_ids, limit)
+        elif search_mode == "TRANSFERS":
+            return self.db_accessor.find_paths_with_multiple_routes(station_ids, limit)
         elif search_mode == "TRANSITIONS":
             return self.db_accessor.find_shortest_paths(
                 station_ids[0], station_ids[-1],

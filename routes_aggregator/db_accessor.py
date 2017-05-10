@@ -36,7 +36,41 @@ class MatchByParametersQueryGenerator:
         return self.MATCH_PART.format(label=label) + conditions + self.RETURN_PART
 
 
-class MatchPathsQueryGenerator:
+class MatchPathsWithSingleRouteQueryGenerator:
+
+    MATCH_PART_PATTERN = "(s{id}:Station)-[r{id}:ROUTE_CONNECTION]->(n:Route)"
+    WHERE_PART_PATTERN = "s{id}.domain_id in $station_ids_{id} "
+    CONDITION_PART_PATTERN = "toInteger(r{}.station_number) < toInteger(r{}.station_number) "
+
+    def __init__(self):
+        pass
+
+    def generate_query(self, station_ids):
+
+        stations_count = len(station_ids)
+
+        match_part = "MATCH "
+        where_part = " WHERE "
+        condition_part = ""
+        return_part = "RETURN DISTINCT r1, n, r{} LIMIT $limit".format(stations_count)
+
+        for i, ids in enumerate(station_ids):
+            match_part += self.MATCH_PART_PATTERN.format(id=i + 1)
+
+            if station_ids[i]:
+                where_part += self.WHERE_PART_PATTERN.format(id=i + 1)
+                if i + 1 < stations_count:
+                    where_part += "and "
+
+            if i + 1 < stations_count:
+                match_part += ", "
+            if i > 0:
+                condition_part += "and " + self.CONDITION_PART_PATTERN.format(i, i + 1)
+
+        return match_part + where_part + condition_part + return_part
+
+
+class MatchPathsWithMultipleRoutesQueryGenerator:
 
     MATCH_PART_BEGIN = "MATCH (s1:Station)-[r1:ROUTE_CONNECTION]->(n1:Route)"
     MATCH_PART_END = "<-[r{}:ROUTE_CONNECTION]-(s{}:Station) "
@@ -64,7 +98,7 @@ class MatchPathsQueryGenerator:
         for i in range(transfers_count):
             match_part += self.MATCH_PART_PATTERN.format(2 * i + 2, i + 2, 2 * i + 3, i + 2)
             condition_part += self.CONDITION_PART.format(2 * i + 3, 2 * i + 4)
-            if station_ids[transfers_count + 1]:
+            if station_ids[i + 1]:
                 where_part += self.WHERE_PART_PATTERN.format(id=i + 2)
             return_part += self.RETURN_PART_PATTERN.format(2 * i + 3, i + 2, 2 * i + 4)
 
@@ -117,7 +151,8 @@ class DbAccessor:
         self.logger = logger
         self.create_indices()
 
-        self.paths_query_generator = MatchPathsQueryGenerator()
+        self.paths_sr_query_generator = MatchPathsWithSingleRouteQueryGenerator()
+        self.paths_mr_query_generator = MatchPathsWithMultipleRoutesQueryGenerator()
         self.params_query_generator = MatchByParametersQueryGenerator()
 
         self.station_cache = {}
@@ -384,13 +419,44 @@ class DbAccessor:
 
         return self.execute(routes_getter, [])
 
-    def find_paths(self, station_ids, limit):
+    def find_paths_with_single_route(self, station_ids, limit):
+
+        def routes_getter(transaction):
+            paths = []
+
+            path_items_count = 1
+            paths_query = self.paths_sr_query_generator.generate_query(station_ids)
+
+            parameters = {'limit': limit}
+            for i, ids in enumerate(station_ids):
+                parameters['station_ids_{}'.format(i + 1)] = ids
+
+            result = transaction.run(paths_query, parameters)
+            data = result.data()
+            if data:
+                for data_item in data:
+                    path = Path()
+                    for i in range(path_items_count):
+                        node_name = 'n{}'.format(i + 1)
+                        first_connection = data_item['r{}'.format(2 * i + 1)]
+                        second_connection = data_item['r{}'.format(2 * i + 2)]
+
+                        route = self.extract_route(data_item, transaction, node_name=node_name)
+                        departure_route_point = first_connection.properties['station_number']
+                        arrival_route_point = second_connection.properties['station_number']
+                        path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
+                    paths.append(path)
+            return paths
+
+        return self.execute(routes_getter, [])
+
+    def find_paths_with_multiple_routes(self, station_ids, limit):
 
         def routes_getter(transaction):
             paths = []
 
             transfers_count = len(station_ids) - 2
-            paths_query = self.paths_query_generator.generate_query(station_ids)
+            paths_query = self.paths_mr_query_generator.generate_query(station_ids)
 
             parameters = {'limit': limit}
             for i, ids in enumerate(station_ids):
