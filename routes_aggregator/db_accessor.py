@@ -424,7 +424,7 @@ class DbAccessor:
         def routes_getter(transaction):
             paths = []
 
-            path_items_count = 1
+            stations_count = len(station_ids)
             paths_query = self.paths_sr_query_generator.generate_query(station_ids)
 
             parameters = {'limit': limit}
@@ -436,15 +436,14 @@ class DbAccessor:
             if data:
                 for data_item in data:
                     path = Path()
-                    for i in range(path_items_count):
-                        node_name = 'n{}'.format(i + 1)
-                        first_connection = data_item['r{}'.format(2 * i + 1)]
-                        second_connection = data_item['r{}'.format(2 * i + 2)]
+                    node_name = 'n'
+                    first_connection = data_item['r1']
+                    second_connection = data_item['r{}'.format(stations_count)]
 
-                        route = self.extract_route(data_item, transaction, node_name=node_name)
-                        departure_route_point = first_connection.properties['station_number']
-                        arrival_route_point = second_connection.properties['station_number']
-                        path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
+                    route = self.extract_route(data_item, transaction, node_name=node_name)
+                    departure_route_point = first_connection.properties['station_number']
+                    arrival_route_point = second_connection.properties['station_number']
+                    path.add_path_item(PathItem(route, departure_route_point, arrival_route_point))
                     paths.append(path)
             return paths
 
