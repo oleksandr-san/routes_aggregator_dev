@@ -21,12 +21,16 @@ class BaseAgent:
             return time
 
 
-class UZSubtrainAgent(BaseAgent):
+class UZSubwayAgent(BaseAgent):
 
     def __init__(self, agent_type, logger):
         super().__init__(agent_type, logger)
 
         self.language_map = {"ua": "", "ru": "_ru", "en": "_en"}
+
+    @staticmethod
+    def prepare_date(date):
+        return date
 
     def build_model(self, model):
         self.logger.debug('ModelProvider: Building model \'{}\''.format(self.agent_type))
@@ -103,8 +107,8 @@ class UZSubtrainAgent(BaseAgent):
                                 model.add_route(route)
                                 if len(children) >= 6:
                                     route.route_number = links[0].text.strip(' /\\')
-                                    route.active_from_date = children[5].text
-                                    route.active_to_date = children[6].text
+                                    route.active_from_date = self.prepare_date(children[5].text)
+                                    route.active_to_date = self.prepare_date(children[6].text)
                             if len(children) >= 6:
                                 route.set_periodicity(children[1].text.strip(' /\\'), language)
                         elif index == 0:
@@ -297,7 +301,7 @@ class UZAgent(BaseAgent):
 class ModelProvider:
 
     def __init__(self, storage_adapter, logger):
-        self.agent_types = {'uz': UZAgent, 'uzs': UZSubtrainAgent}
+        self.agent_types = {'uz': UZAgent, 'uzs': UZSubwayAgent}
         self.storage_adapter = storage_adapter
         self.logger = logger
 
