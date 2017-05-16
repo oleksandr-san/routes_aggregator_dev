@@ -210,10 +210,13 @@ class DbAccessor:
             'station_id': station.station_id
         }
 
-        properties.update(station.get_properties())
+        if station.get_properties():
+            properties.update(station.get_properties())
+
         station_query = self.CREATE_NODE.format(
             label='Station',
             properties=self.prepare_properties(properties))
+
         transaction.run(station_query)
 
     def create_route(self, route, transaction):
